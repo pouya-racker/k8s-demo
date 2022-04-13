@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sidecar-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web-pod
+  template:
+    metadata:
+      labels:
+        app: web-pod
+    spec:
+      containers:
+        - name: python-http-server
+          image: python:2.7
+          command: [ "/bin/bash" ]
+          args: [ "-c", "echo \" Hello from $(hostname)\" > index.html; python -m SimpleHTTPServer 5000" ]
+          ports:
+            - name: web-pod
+              containerPort: 5000
+        # nginx reverse proxy sidecar
+        - name: nginx-proxy
+          image: nginx:1.19
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+          ports:
+            - name: http
+              containerPort: 80
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: nginx-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+data:
+  elasticsearch.conf: |
+    server {
+       listen       80;
+       server_name  localhost;
+       location / {
+       root   /usr/share/nginx/html;
+       index  index.html index.htm;
+       }
+       location /api/ {
+       proxy_pass  http://localhost:5000/;
+       }
+       error_page   500 502 503 504  /50x.html;
+       location = /50x.html {
+       root   /usr/share/nginx/html;
+           }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sidecar-app
+spec:
+  selector:
+    app.kubernetes.io/name: sidecar-app
+  ports:
+    - port: 80
+      targetPort: 80
