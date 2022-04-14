@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sidecar-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sidecar-app
+  template:
+    metadata:
+      labels:
+        app: sidecar-app
+    spec:
+      containers:
+        - name: python-http-server
+          image: python:2.7
+          command: [ "/bin/bash" ]
+          args: [ "-c", "echo \" Hello from $(hostname)\" > index.html; python -m SimpleHTTPServer 5000" ]
+          ports:
+            - name: app
+              containerPort: 5000
+        # nginx reverse proxy sidecar
+        - name: nginx-proxy
+          image: nginx:1.19
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+          ports:
+            - name: http
+              containerPort: 80
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: nginx-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+data:
+  nginx.conf: |
+    server {
+      listen 80 default_server;
+      listen [::]:80 default_server;
+
+      server_name sidecar-app;
+
+      location / {
+          if ($http_x_forwarded_proto = 'http') {
+             return 301 https://$server_name$request_uri;
+        }
+          proxy_pass http://localhost:8000/;
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sidecar-app
+spec:
+  selector:
+    app: sidecar-app
+  ports:
+    - port: 80
+      targetPort: 80
+  type: LoadBalancer
+
